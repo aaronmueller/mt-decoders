@@ -1,4 +1,13 @@
 #!/usr/bin/env python
+'''
+Authors: Aaron Mueller, Prakhar Kaushik
+Date: 11 October 2018
+Course: Machine Translation (EN 668)
+Instructor: Philipp Koehn
+Assignment: HW3 -- Decoding
+'''
+
+
 import optparse
 import sys
 import models
@@ -14,6 +23,7 @@ optparser.add_option("-s", "--stack-size", dest="s", default=1, type="int", help
 optparser.add_option("-v", "--verbose", dest="verbose", action="store_true", default=False,  help="Verbose mode (default=off)")
 opts = optparser.parse_args()[0]
 
+# leave everything unchanged to start
 tm = models.TM(opts.tm, opts.k)
 lm = models.LM(opts.lm)
 french = [tuple(line.strip().split()) for line in open(opts.input).readlines()[:opts.num_sents]]
@@ -50,18 +60,33 @@ for f in french:
             if lm_state not in stacks[j] or stacks[j][lm_state].logprob < logprob: # second case is recombination
               stacks[j][lm_state] = new_hypothesis 
         
-        # BEGIN PHRASE-SWAP CHECKING
+        # BEGIN PHRASE-SWAP CHECKING (where we come in!)
         for mid in range(i+1, j):
           if f[i:mid] in tm and f[mid:j] in tm: # make sure we only check phrases with p != 0
             for prev_phrase in tm[f[i:mid]]:
-              for next_phrase in tm[f[mid:j]]:
+              for next_phrase in tm[f[mid:j]]:  # go through all translations in table
                 next_logprob = h.logprob + next_phrase.logprob
                 next_lm_state = h.lm_state
+                # get logprob for words in phrase after mid split
                 for word in next_phrase.english.split():
                   (next_lm_state, word_logprob) = lm.score(next_lm_state, word)
+                  next_logprob += word_logprob
+                next_hypothesis = hypothesis(next_logprob, next_lm_state, h, next_phrase)
+                # get logprob for words in phrase before mid split
+                # same as before, just  with `prev` instead of `next` & starting at `next_lm_state`
+                prev_logprob = next_logprob + prev_phrase.logprob
+                prev_lm_state = next_lm_state
+                for word in prev_phrase.english.split():
+                  (prev_lm_state, word_logprob) = lm.score(prev_lm_state, word)
+                  prev_logprob += word_logprob
+                if j == len(f):     # check if we're at end of sentence; add EOS if so
+                  prev_logprob += lm.end(prev_lm_state)
+                prev_hypothesis = hypothesis(prev_logprob, prev_lm_state, next_hypothesis, prev_phrase)
+
+                if prev_lm_state not in stacks[j] or stacks[j][prev_lm_state].logprob < prev_logprob:
+                  stacks[j][prev_lm_state] = prev_hypothesis
                   
             
-
   winner = max(stacks[-1].itervalues(), key=lambda h: h.logprob)
   def extract_english(h): 
     return "" if h.predecessor is None else "%s%s " % (extract_english(h.predecessor), h.phrase.english)
